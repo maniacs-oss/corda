@@ -1,7 +1,6 @@
 package net.corda.nodeapi.internal.crypto
 
 import net.corda.core.identity.CordaX500Name
-import net.corda.core.internal.cert
 import net.corda.core.internal.read
 import java.nio.file.Path
 import java.security.KeyPair
@@ -17,24 +16,20 @@ class KeyStoreWrapper(private val storePath: Path, private val storePassword: St
         // Assume key password = store password.
         val clientCA = certificateAndKeyPair(X509Utilities.CORDA_CLIENT_CA)
         // Create new keys and store in keystore.
-        val cert = X509Utilities.createCertificate(CertificateType.LEGAL_IDENTITY, clientCA.certificate, clientCA.keyPair, serviceName, pubKey)
-        val certPath = X509CertificateFactory().generateCertPath(cert.cert, *clientCertPath)
-        require(certPath.certificates.isNotEmpty()) { "Certificate path cannot be empty" }
+        val identityCert = X509Utilities.createCertificate(
+                CertificateType.LEGAL_IDENTITY,
+                clientCA.certificate,
+                clientCA.keyPair,
+                serviceName.x500Principal,
+                pubKey)
         // TODO: X509Utilities.validateCertificateChain()
-        return certPath
+        return X509CertificateFactory().generateCertPath(identityCert, *clientCertPath)
     }
 
     fun signAndSaveNewKeyPair(serviceName: CordaX500Name, privateKeyAlias: String, keyPair: KeyPair) {
         val certPath = createCertificate(serviceName, keyPair.public)
         // Assume key password = store password.
         keyStore.addOrReplaceKey(privateKeyAlias, keyPair.private, storePassword.toCharArray(), certPath.certificates.toTypedArray())
-        keyStore.save(storePath, storePassword)
-    }
-
-    fun savePublicKey(serviceName: CordaX500Name, pubKeyAlias: String, pubKey: PublicKey) {
-        val certPath = createCertificate(serviceName, pubKey)
-        // Assume key password = store password.
-        keyStore.addOrReplaceCertificate(pubKeyAlias, certPath.certificates.first())
         keyStore.save(storePath, storePassword)
     }
 

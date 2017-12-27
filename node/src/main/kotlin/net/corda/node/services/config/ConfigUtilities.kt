@@ -7,7 +7,10 @@ import com.typesafe.config.ConfigRenderOptions
 import net.corda.core.crypto.Crypto
 import net.corda.core.crypto.SignatureScheme
 import net.corda.core.identity.CordaX500Name
-import net.corda.core.internal.*
+import net.corda.core.internal.createDirectories
+import net.corda.core.internal.div
+import net.corda.core.internal.exists
+import net.corda.core.internal.x500Name
 import net.corda.nodeapi.internal.config.SSLConfiguration
 import net.corda.nodeapi.internal.crypto.*
 import org.bouncycastle.asn1.x509.GeneralName
@@ -94,7 +97,7 @@ fun createKeystoreForCordaNode(sslKeyStorePath: Path,
                                legalName: CordaX500Name,
                                signatureScheme: SignatureScheme = X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME) {
 
-    val rootCACert = caKeyStore.getX509Certificate(X509Utilities.CORDA_ROOT_CA).toX509CertHolder()
+    val rootCACert = caKeyStore.getX509Certificate(X509Utilities.CORDA_ROOT_CA)
     val (intermediateCACert, intermediateCAKeyPair) = caKeyStore.getCertificateAndKeyPair(X509Utilities.CORDA_INTERMEDIATE_CA, caKeyPassword)
 
     val clientKey = Crypto.generateKeyPair(signatureScheme)
@@ -103,12 +106,12 @@ fun createKeystoreForCordaNode(sslKeyStorePath: Path,
     val clientCACert = X509Utilities.createCertificate(CertificateType.NODE_CA,
             intermediateCACert,
             intermediateCAKeyPair,
-            legalName,
+            legalName.x500Principal,
             clientKey.public,
             nameConstraints = nameConstraints)
 
     val tlsKey = Crypto.generateKeyPair(signatureScheme)
-    val clientTLSCert = X509Utilities.createCertificate(CertificateType.TLS, clientCACert, clientKey, legalName, tlsKey.public)
+    val clientTLSCert = X509Utilities.createCertificate(CertificateType.TLS, clientCACert, clientKey, legalName.x500Principal, tlsKey.public)
 
     val keyPass = keyPassword.toCharArray()
 

@@ -1,8 +1,6 @@
 package net.corda.node
 
 import net.corda.core.crypto.Crypto
-import net.corda.core.identity.CordaX500Name
-import net.corda.core.internal.cert
 import net.corda.core.internal.div
 import net.corda.core.utilities.getOrThrow
 import net.corda.node.services.config.configureDevKeyAndTrustStores
@@ -12,6 +10,7 @@ import net.corda.testing.ALICE_NAME
 import net.corda.testing.driver.driver
 import org.junit.Test
 import java.nio.file.Path
+import javax.security.auth.x500.X500Principal
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -47,10 +46,10 @@ class NodeKeystoreCheckTest {
 
             // Self signed root
             val badRootKeyPair = Crypto.generateKeyPair()
-            val badRoot = X509Utilities.createSelfSignedCACertificate(CordaX500Name("Bad Root", "Lodnon", "GB"), badRootKeyPair)
+            val badRoot = X509Utilities.createSelfSignedCACertificate(X500Principal("O=Bad Root,L=Lodnon,C=GB"), badRootKeyPair)
             val nodeCA = keystore.getCertificateAndKeyPair(X509Utilities.CORDA_CLIENT_CA, config.keyStorePassword)
-            val badNodeCACert = X509Utilities.createCertificate(CertificateType.NODE_CA, badRoot, badRootKeyPair, ALICE_NAME, nodeCA.keyPair.public)
-            keystore.setKeyEntry(X509Utilities.CORDA_CLIENT_CA, nodeCA.keyPair.private, config.keyStorePassword.toCharArray(), arrayOf(badNodeCACert.cert, badRoot.cert))
+            val badNodeCACert = X509Utilities.createCertificate(CertificateType.NODE_CA, badRoot, badRootKeyPair, ALICE_NAME.x500Principal, nodeCA.keyPair.public)
+            keystore.setKeyEntry(X509Utilities.CORDA_CLIENT_CA, nodeCA.keyPair.private, config.keyStorePassword.toCharArray(), arrayOf(badNodeCACert, badRoot))
             keystore.save(config.nodeKeystore, config.keyStorePassword)
 
             assertFailsWith(IllegalArgumentException::class) {

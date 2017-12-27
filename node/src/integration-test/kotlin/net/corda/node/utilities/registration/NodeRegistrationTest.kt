@@ -2,11 +2,12 @@ package net.corda.node.utilities.registration
 
 import net.corda.core.crypto.Crypto
 import net.corda.core.identity.CordaX500Name
-import net.corda.core.internal.cert
 import net.corda.core.internal.concurrent.transpose
-import net.corda.core.internal.toX509CertHolder
 import net.corda.core.messaging.startFlow
-import net.corda.core.utilities.*
+import net.corda.core.utilities.NetworkHostAndPort
+import net.corda.core.utilities.OpaqueBytes
+import net.corda.core.utilities.getOrThrow
+import net.corda.core.utilities.minutes
 import net.corda.finance.DOLLARS
 import net.corda.finance.flows.CashIssueAndPaymentFlow
 import net.corda.nodeapi.internal.crypto.CertificateAndKeyPair
@@ -16,8 +17,7 @@ import net.corda.nodeapi.internal.crypto.X509Utilities
 import net.corda.nodeapi.internal.crypto.X509Utilities.CORDA_CLIENT_CA
 import net.corda.nodeapi.internal.crypto.X509Utilities.CORDA_INTERMEDIATE_CA
 import net.corda.nodeapi.internal.crypto.X509Utilities.CORDA_ROOT_CA
-import net.corda.nodeapi.internal.network.NotaryInfo
-import net.corda.testing.ROOT_CA
+import net.corda.testing.DEV_ROOT_CA
 import net.corda.testing.SerializationEnvironmentRule
 import net.corda.testing.driver.PortAllocation
 import net.corda.testing.node.NotarySpec
@@ -25,7 +25,6 @@ import net.corda.testing.node.internal.CompatibilityZoneParams
 import net.corda.testing.node.internal.internalDriver
 import net.corda.testing.node.internal.network.NetworkMapServer
 import net.corda.testing.singleIdentity
-import net.corda.testing.singleIdentityAndCert
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.bouncycastle.pkcs.PKCS10CertificationRequest
@@ -40,8 +39,10 @@ import java.net.URL
 import java.security.KeyPair
 import java.security.cert.CertPath
 import java.security.cert.Certificate
+import java.security.cert.X509Certificate
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import javax.security.auth.x500.X500Principal
 import javax.ws.rs.*
 import javax.ws.rs.core.MediaType
 import javax.ws.rs.core.Response
@@ -51,13 +52,13 @@ class NodeRegistrationTest {
     @JvmField
     val testSerialization = SerializationEnvironmentRule(true)
     private val portAllocation = PortAllocation.Incremental(13000)
-    private val registrationHandler = RegistrationHandler(ROOT_CA)
+    private val registrationHandler = RegistrationHandler(DEV_ROOT_CA)
     private lateinit var server: NetworkMapServer
     private lateinit var serverHostAndPort: NetworkHostAndPort
 
     @Before
     fun startServer() {
-        server = NetworkMapServer(1.minutes, portAllocation.nextHostAndPort(), ROOT_CA, "localhost", registrationHandler)
+        server = NetworkMapServer(1.minutes, portAllocation.nextHostAndPort(), DEV_ROOT_CA, "localhost", registrationHandler)
         serverHostAndPort = server.start()
     }
 
@@ -68,7 +69,7 @@ class NodeRegistrationTest {
 
     @Test
     fun `node registration correct root cert`() {
-        val compatibilityZone = CompatibilityZoneParams(URL("http://$serverHostAndPort"), rootCert = ROOT_CA.certificate.cert)
+        val compatibilityZone = CompatibilityZoneParams(URL("http://$serverHostAndPort"), rootCert = DEV_ROOT_CA.certificate)
         internalDriver(
                 portAllocation = portAllocation,
                 compatibilityZone = compatibilityZone,
@@ -112,7 +113,7 @@ class NodeRegistrationTest {
 
     @Test
     fun `node registration wrong root cert`() {
-        val someCert = createSelfKeyAndSelfSignedCertificate().certificate.cert
+        val someCert = createSelfKeyAndSelfSignedCertificate().certificate
         val compatibilityZone = CompatibilityZoneParams(URL("http://$serverHostAndPort"), rootCert = someCert)
         internalDriver(
                 portAllocation = portAllocation,
@@ -131,11 +132,7 @@ class NodeRegistrationTest {
     private fun createSelfKeyAndSelfSignedCertificate(): CertificateAndKeyPair {
         val rootCAKey = Crypto.generateKeyPair(X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME)
         val rootCACert = X509Utilities.createSelfSignedCACertificate(
-                CordaX500Name(
-                        commonName = "Integration Test Corda Node Root CA",
-                        organisation = "R3 Ltd",
-                        locality = "London",
-                        country = "GB"),
+                X500Principal("CN=Integration Test Corda Node Root CA,O=R3 Ltd,L=London,C=GB"),
                 rootCAKey)
         return CertificateAndKeyPair(rootCACert, rootCAKey)
     }
@@ -154,7 +151,7 @@ class RegistrationHandler(private val rootCertAndKeyPair: CertificateAndKeyPair)
         val (certPath, name) = createSignedClientCertificate(
                 certificationRequest,
                 rootCertAndKeyPair.keyPair,
-                arrayOf(rootCertAndKeyPair.certificate.cert))
+                arrayOf(rootCertAndKeyPair.certificate))
         certPaths[name.organisation] = certPath
         return Response.ok(name.organisation).build()
     }
@@ -186,12 +183,12 @@ class RegistrationHandler(private val rootCertAndKeyPair: CertificateAndKeyPair)
         val request = JcaPKCS10CertificationRequest(certificationRequest)
         val name = CordaX500Name.parse(request.subject.toString())
         val x509CertificateHolder = X509Utilities.createCertificate(CertificateType.NODE_CA,
-                caCertPath.first().toX509CertHolder(),
+                caCertPath[0] as X509Certificate ,
                 caKeyPair,
-                name,
+                name.x500Principal,
                 request.publicKey,
                 nameConstraints = null)
-        val certPath = X509CertificateFactory().generateCertPath(x509CertificateHolder.cert, *caCertPath)
+        val certPath = X509CertificateFactory().generateCertPath(x509CertificateHolder, *caCertPath)
         return Pair(certPath, name)
     }
 }

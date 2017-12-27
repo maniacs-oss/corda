@@ -9,7 +9,6 @@ import com.nhaarman.mockito_kotlin.whenever
 import net.corda.core.crypto.Crypto
 import net.corda.core.crypto.SecureHash
 import net.corda.core.identity.CordaX500Name
-import net.corda.core.internal.cert
 import net.corda.core.internal.createDirectories
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.nodeapi.internal.crypto.*
@@ -22,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import java.security.cert.Certificate
 import java.security.cert.X509Certificate
+import javax.security.auth.x500.X500Principal
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -29,9 +29,9 @@ class NetworkRegistrationHelperTest {
     private val fs = Jimfs.newFileSystem(unix())
     private val requestId = SecureHash.randomSHA256().toString()
     private val nodeLegalName = ALICE_NAME
-    private val intermediateCaName = CordaX500Name("CORDA_INTERMEDIATE_CA", "R3 Ltd", "London", "GB")
-    private val rootCaName = CordaX500Name("CORDA_ROOT_CA", "R3 Ltd", "London", "GB")
-    private val nodeCaCert = createCaCert(nodeLegalName)
+    private val intermediateCaName = X500Principal("CN=CORDA_INTERMEDIATE_CA,O=R3 Ltd,L=London,C=GB")
+    private val rootCaName = X500Principal("CN=CORDA_ROOT_CA,O=R3 Ltd,L=London,C=GB")
+    private val nodeCaCert = createCaCert(nodeLegalName.x500Principal)
     private val intermediateCaCert = createCaCert(intermediateCaName)
     private val rootCaCert = createCaCert(rootCaName)
 
@@ -108,7 +108,7 @@ class NetworkRegistrationHelperTest {
 
     @Test
     fun `wrong root cert in truststore`() {
-        saveTrustStoreWithRootCa(createCaCert(CordaX500Name("Foo", "MU", "GB")))
+        saveTrustStoreWithRootCa(createCaCert(X500Principal("O=Foo,L=MU,C=GB")))
         val registrationHelper = createRegistrationHelper()
         assertThatThrownBy {
             registrationHelper.buildKeystore()
@@ -131,7 +131,7 @@ class NetworkRegistrationHelperTest {
         }
     }
 
-    private fun createCaCert(name: CordaX500Name): X509Certificate {
-        return X509Utilities.createSelfSignedCACertificate(name, Crypto.generateKeyPair(X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME)).cert
+    private fun createCaCert(name: X500Principal): X509Certificate {
+        return X509Utilities.createSelfSignedCACertificate(name, Crypto.generateKeyPair(X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME))
     }
 }

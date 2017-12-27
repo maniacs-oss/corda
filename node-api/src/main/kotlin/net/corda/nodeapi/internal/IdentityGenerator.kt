@@ -4,7 +4,6 @@ import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.generateKeyPair
 import net.corda.core.identity.CordaX500Name
 import net.corda.core.identity.Party
-import net.corda.core.internal.cert
 import net.corda.core.internal.createDirectories
 import net.corda.core.internal.div
 import net.corda.core.utilities.trace
@@ -52,12 +51,23 @@ object IdentityGenerator {
         val rootCert = customRootCert ?: caKeyStore.getCertificate(X509Utilities.CORDA_ROOT_CA)
 
         keyPairs.zip(dirs) { keyPair, dir ->
-            val serviceKeyCert = X509Utilities.createCertificate(CertificateType.SERVICE_IDENTITY, intermediateCa.certificate, intermediateCa.keyPair, name, keyPair.public)
-            val compositeKeyCert = X509Utilities.createCertificate(CertificateType.SERVICE_IDENTITY, intermediateCa.certificate, intermediateCa.keyPair, name, key)
+            val (serviceKeyCert, compositeKeyCert) = listOf(keyPair.public, key).map { publicKey ->
+                X509Utilities.createCertificate(
+                        CertificateType.SERVICE_IDENTITY,
+                        intermediateCa.certificate,
+                        intermediateCa.keyPair,
+                        name.x500Principal,
+                        publicKey
+                )
+            }
             val certPath = (dir / "certificates").createDirectories() / "distributedService.jks"
             val keystore = loadOrCreateKeyStore(certPath, "cordacadevpass")
-            keystore.setCertificateEntry("$aliasPrefix-composite-key", compositeKeyCert.cert)
-            keystore.setKeyEntry("$aliasPrefix-private-key", keyPair.private, "cordacadevkeypass".toCharArray(), arrayOf(serviceKeyCert.cert, intermediateCa.certificate.cert, rootCert))
+            keystore.setCertificateEntry("$aliasPrefix-composite-key", compositeKeyCert)
+            keystore.setKeyEntry(
+                    "$aliasPrefix-private-key",
+                    keyPair.private,
+                    "cordacadevkeypass".toCharArray(),
+                    arrayOf(serviceKeyCert, intermediateCa.certificate, rootCert))
             keystore.save(certPath, "cordacadevpass")
         }
 
