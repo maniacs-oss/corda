@@ -11,16 +11,16 @@ import net.corda.core.crypto.SecureHash
 import net.corda.core.identity.CordaX500Name
 import net.corda.core.internal.cert
 import net.corda.core.internal.createDirectories
+import net.corda.core.internal.x500Name
+import net.corda.core.utilities.days
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.nodeapi.internal.crypto.*
 import net.corda.testing.ALICE_NAME
 import net.corda.testing.internal.rigorousMock
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.*
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import java.security.cert.Certificate
 import java.security.cert.X509Certificate
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -31,9 +31,9 @@ class NetworkRegistrationHelperTest {
     private val nodeLegalName = ALICE_NAME
     private val intermediateCaName = CordaX500Name("CORDA_INTERMEDIATE_CA", "R3 Ltd", "London", "GB")
     private val rootCaName = CordaX500Name("CORDA_ROOT_CA", "R3 Ltd", "London", "GB")
-    private val nodeCaCert = createCaCert(nodeLegalName)
-    private val intermediateCaCert = createCaCert(intermediateCaName)
-    private val rootCaCert = createCaCert(rootCaName)
+    private val nodeCaCert = createCaCert(nodeLegalName, CertificateType.NODE_CA)
+    private val intermediateCaCert = createCaCert(intermediateCaName, CertificateType.INTERMEDIATE_CA)
+    private val rootCaCert = createCaCert(rootCaName, CertificateType.ROOT_CA)
 
     private lateinit var config: NodeConfiguration
 
@@ -63,7 +63,7 @@ class NetworkRegistrationHelperTest {
 
         saveTrustStoreWithRootCa(rootCaCert)
 
-        createRegistrationHelper().buildKeystore()
+        createRegistrationHelper(nodeCaCert, intermediateCaCert, rootCaCert).buildKeystore()
 
         val nodeKeystore = loadKeyStore(config.nodeKeystore, config.keyStorePassword)
         val sslKeystore = loadKeyStore(config.sslKeystore, config.keyStorePassword)
@@ -102,23 +102,44 @@ class NetworkRegistrationHelperTest {
     @Test
     fun `missing truststore`() {
         assertThatThrownBy {
-            createRegistrationHelper()
+            createRegistrationHelper(nodeCaCert, intermediateCaCert, rootCaCert)
         }.hasMessageContaining("This file must contain the root CA cert of your compatibility zone. Please contact your CZ operator.")
     }
 
     @Test
+    fun `node CA with incorrect cert role`() {
+        saveTrustStoreWithRootCa(rootCaCert)
+        val incorrectNodeCaCert = createCaCert(nodeLegalName, CertificateType.INTERMEDIATE_CA)
+        val registrationHelper = createRegistrationHelper(incorrectNodeCaCert, intermediateCaCert, rootCaCert)
+        assertThatExceptionOfType(CertificateRequestException::class.java)
+                .isThrownBy { registrationHelper.buildKeystore() }
+                .withMessageContaining(CertificateType.INTERMEDIATE_CA.toString())
+    }
+
+    @Test
+    fun `node CA with incorrect subject`() {
+        saveTrustStoreWithRootCa(rootCaCert)
+        val invalidName = CordaX500Name("Foo", "MU", "GB")
+        val incorrectNodeCaCert = createCaCert(invalidName, CertificateType.NODE_CA)
+        val registrationHelper = createRegistrationHelper(incorrectNodeCaCert, intermediateCaCert, rootCaCert)
+        assertThatExceptionOfType(CertificateRequestException::class.java)
+                .isThrownBy { registrationHelper.buildKeystore() }
+                .withMessageContaining(invalidName.toString())
+    }
+
+    @Test
     fun `wrong root cert in truststore`() {
-        saveTrustStoreWithRootCa(createCaCert(CordaX500Name("Foo", "MU", "GB")))
-        val registrationHelper = createRegistrationHelper()
+        saveTrustStoreWithRootCa(createCaCert(CordaX500Name("Foo", "MU", "GB"), CertificateType.ROOT_CA))
+        val registrationHelper = createRegistrationHelper(nodeCaCert, intermediateCaCert, rootCaCert)
         assertThatThrownBy {
             registrationHelper.buildKeystore()
         }.isInstanceOf(WrongRootCertException::class.java)
     }
 
-    private fun createRegistrationHelper(): NetworkRegistrationHelper {
+    private fun createRegistrationHelper(vararg response: X509Certificate): NetworkRegistrationHelper {
         val certService = rigorousMock<NetworkRegistrationService>().also {
             doReturn(requestId).whenever(it).submitRequest(any())
-            doReturn(arrayOf<Certificate>(nodeCaCert, intermediateCaCert, rootCaCert)).whenever(it).retrieveCertificates(eq(requestId))
+            doReturn(response).whenever(it).retrieveCertificates(eq(requestId))
         }
         return NetworkRegistrationHelper(config, certService)
     }
@@ -131,7 +152,10 @@ class NetworkRegistrationHelperTest {
         }
     }
 
-    private fun createCaCert(name: CordaX500Name): X509Certificate {
-        return X509Utilities.createSelfSignedCACertificate(name, Crypto.generateKeyPair(X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME)).cert
+    // TODO This is completely wrong! https://github.com/corda/corda/pull/2298 fixes this.
+    private fun createCaCert(name: CordaX500Name, type: CertificateType): X509Certificate {
+        val keyPair = Crypto.generateKeyPair(X509Utilities.DEFAULT_TLS_SIGNATURE_SCHEME)
+        val window = X509Utilities.getCertificateValidityWindow(0.days, 3650.days)
+        return X509Utilities.createCertificate(type, name.x500Name, keyPair, name.x500Name, keyPair.public, window).cert
     }
 }
